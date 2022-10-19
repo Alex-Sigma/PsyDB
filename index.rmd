@@ -1,0 +1,1852 @@
+---
+title: "PsyTest| Dashboard"
+output:
+  flexdashboard::flex_dashboard:
+    orientation: rows
+    vertical_layout: scroll
+    theme: 
+        bootswatch: morph
+    fontsize: 16pt
+
+---
+
+
+<!-- theme:  -->
+<!--    version: 5  -->
+
+<!-- <ion-icon name="finger-print-outline"></ion-icon> -->
+<!-- data-icon="fa-table" -->
+
+<!-- <i class="fa-solid fa-file-pen"></i> -->
+
+<!-- data-icon="fa-pencil" -->
+
+
+
+Test 1 {data-icon="fa-signal"}
+====================
+
+
+
+```{r setup}
+knitr::opts_chunk$set(echo = FALSE)
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+# Data Import
+library(readxl)
+
+#core:
+library(tidyverse)
+library(tidyr)
+library(reshape2)
+library(rlang)
+library(stringr)
+library(forcats)
+library(dplyr)
+library(lubridate)
+library(tidyquant)
+library(purrr)
+
+#EDA
+library(skimr)
+
+# Visualise:
+library(plotly)
+
+# Theming 
+library(bslib)
+
+```
+
+
+
+
+```{r}
+# Theming the Flexdashboard: 
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+count_dubl <- function(Data,kurzel){
+    
+    Data %>% 
+    group_by({{kurzel}}) %>%
+    summarize(N=n()) %>%
+    ungroup() 
+    
+}
+
+# DL Werte Gesamt Klakulieren 
+dl_wert <- function(Data){
+    
+    Data %>% 
+        pivot_longer(!DL02_01, names_to = "Fragen", values_to = "Antwort") %>% 
+    # noten 
+    mutate(Note= case_when(
+        Antwort=="дуже негативні"~6, 
+        Antwort=="негативні"~5,
+        Antwort=="злегка негативні"~4,
+        Antwort=="трохи позитивні"~3,
+        Antwort=="позитивні"~2,
+        Antwort=="дуже позитивні"~1
+    )) %>% 
+    # Berechnung der Globale-wert 
+    group_by(DL02_01) %>% 
+    summarize(Gesamtwert=sum(Note)) %>% 
+    ungroup() %>% 
+    
+    mutate(Mittelwert=Gesamtwert/17) %>% 
+    
+    mutate(Bewertung=case_when(
+        Mittelwert %>% between(left = 1,right = 3)~"Ehe Positiv", 
+        Mittelwert >3~"Ehe Negativ"
+        
+    )) 
+}
+
+#DL Lebensbreiche Statistik kalkulieren 
+
+
+dl_lb <- function(Data){
+    Data %>% 
+        pivot_longer(!DL02_01, names_to = "Fragen", values_to = "Antwort") %>% 
+    # noten 
+    mutate(Note= case_when(
+        Antwort=="дуже негативні"~6, 
+        Antwort=="негативні"~5,
+        Antwort=="злегка негативні"~4,
+        Antwort=="трохи позитивні"~3,
+        Antwort=="позитивні"~2,
+        Antwort=="дуже позитивні"~1
+    )) %>% 
+    # Schlüsseln DE     
+    left_join(
+        Fragen_Beschreibung, by=c("Fragen"="Kurzel")
+    ) %>% 
+    # Notwendige Variablen     
+    select(DL02_01, Fragen,Frage_DE,Antwort, Note) %>% 
+        
+    # Lb Statistik Kalkulieren: 
+    group_by(Frage_DE) %>% 
+    summarize(N=n(), 
+              M=mean(Note), 
+              SD=sd(Note), 
+              Min=min(Note), 
+              Max=max(Note)) %>% 
+    ungroup() 
+    
+}
+
+stat_des <- function(Data, group, wert){
+  
+  Data %>% 
+    group_by({{group}}) %>% 
+    summarize(N=n(), 
+              M=mean({{wert}}), 
+              SD=sd({{wert}}), 
+              Min=min({{wert}}), 
+              Max=max({{wert}})) %>% 
+    ungroup() 
+    
+}
+
+
+fr_sc <- function(Data){
+  Data %>% 
+        left_join(
+            SC_Skala %>% mutate(id=row_number()),
+            by=c("Skala"="Skala_krz")
+    ) %>% 
+    # formating 
+    relocate(Skala_Name, .before=N) %>% 
+    select(-Skala) %>% 
+    rename(Skala=Skala_Name) %>% 
+    
+    # formating, wrangling 
+    arrange(id) %>% 
+    select(-id)   
+    
+}
+
+
+
+
+# Visualize the barcarts 
+
+# Buidling the function: 
+
+plot_test <- function(Data, 
+                      x,
+                      y,
+                      group,
+                      text,
+                      order) {
+# Setting the colors: 
+pal <- c("#18BC9C","#1F78B4")
+pal <- setNames(pal,order)
+
+
+Data %>% 
+  plot_ly(x           = {{x}}, 
+          y           = {{y}}, 
+          typ         = 'bar',
+          color       = {{group}}, 
+          orintation  = ~ 'h',
+          colors      = pal, 
+          hoverinfo   = 'text',
+          text        = {{text}}
+          
+          ) %>% 
+  
+      plotly::layout(legend=list(x=0.2,y=-0.1, 
+                             orientation = 'h'
+                             ), 
+                     xaxis = list(title=""), 
+                     yaxis = list(title = "")
+                     ) %>% 
+  config(displayModeBar= FALSE)
+  
+}
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+# Part 1 
+## Data Load
+
+
+Fragebogen_01_raw_tbl <- read_excel("~/Desktop/Anna_Master /01_Data/Post /POST_Fragebogen.xlsx", 
+    col_types = c("numeric", "numeric", "numeric", 
+        "text", "text", "date", "text", "text", 
+        "text", "text", "text", "numeric", 
+        "text", "text", "text", "text", "text", 
+        "numeric", "text", "text", "text", 
+        "text", "numeric", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "text", "text", 
+        "text", "text", "text", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric", "numeric", 
+        "numeric", "numeric"))
+
+
+# Initial Processing: 
+Fragebogen_01_raw_tbl <- 
+    Fragebogen_01_raw_tbl %>%
+    # fix time 
+    mutate(STARTED=STARTED %>% as_date() %>% ymd()) %>% 
+    
+    # change format 
+    dplyr::as_tibble()
+
+# DL Schlüssel 
+## Schlussel Fragen 
+
+Fragen_Beschreibung <- read_excel("/Users/oleksiiastakhov/Desktop/Anna_Master /01_Data/Fragebogen /Fragen_Beschreibung.xlsx")
+
+Fragen_Schlussel_Antwort <- read_excel("/Users/oleksiiastakhov/Desktop/Anna_Master /01_Data/Fragebogen /Fragen_Schlussel_Antworten.xlsx")
+
+
+
+# CISS Schlüssel:
+## TWerte
+TWerte_01_tbl <- read_excel(path = "~/Desktop/Anna_Master /01_Data/CISS/CISS T Werte (1) pure.xlsx", sheet = "Data", col_names = TRUE)
+
+    
+# Auswertungsschablone: 
+Auswertungsschablone_01_tbl <- read_excel(path = "~/Desktop/Anna_Master /01_Data/CISS/CISS T Werte (1) pure.xlsx", sheet = "Auswertungsschablone", col_names = TRUE)
+
+
+
+
+
+SC_Stanine_HF_01_Frauen_20_30 <- read_excel(path = "~/Desktop/Anna_Master /01_Data/SCI/SC.xlsx", col_names = TRUE,sheet = "Frauen_20_30")
+
+
+SC_Stanine_HF_02_Frauen_31_50 <- read_excel(path = "~/Desktop/Anna_Master /01_Data/SCI/SC.xlsx", col_names = TRUE,sheet = "Frauen_31_50")
+
+
+SC_Stanine_HF_02_Frauen_52_ueber <- read_excel(path = "~/Desktop/Anna_Master /01_Data/SCI/SC.xlsx", col_names = TRUE,sheet = "Frauen_52_ueber")
+
+
+SC_Fragen_schl <- read_excel(path = "~/Desktop/Anna_Master /01_Data/SCI/SC.xlsx", col_names = TRUE,sheet = "Fragen")
+
+
+SC_Skala <- read_excel(path = "~/Desktop/Anna_Master /01_Data/SCI/SC.xlsx", col_names = TRUE,sheet = "Skala")
+# View(data_test314167_2022_06_12_16_14_repariert_daten)
+
+
+# POST_Fragebogen %>% glimpse()
+# 
+# POST_Fragebogen %>% 
+#     mutate(STARTED=STARTED %>% as_date() %>% ymd()) %>% 
+#     #filter(STARTED =="2022-07-01") %>% view()
+#     distinct(STARTED)
+
+
+# Gruppen 
+
+
+
+
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+# Filters 
+
+
+# Messwiederholung: 
+### Pre 
+Pre_Datum <- c("2022-06-06", "2022-06-07", 
+               "2022-06-08", "2022-06-11", 
+               "2022-06-12", "2022-07-01")
+
+## Post 
+Post_Datum <- c("2022-07-15", "2022-07-16")
+
+#Gruppen 
+# Kontrollgruppe: : 
+Kontrollgruppe <- c("AB22HA","BI05IA","BU12OV","CH11RA","CH28NA", 
+                    "CT03PA", "IR10LA","KI09NA","KI14HA","Ki26NA",
+                    "LI14RA","LU07SA","LU19IA","MA08LA","MA13NA",
+                    "OD09HA","OD23HA","ZA01RA","ZA16AM","СH04IA")
+## Studiengruppe 
+Studiengruppe <- c("AN18KA","BA19IA","BO25LA","CH03SA","CH09IA",
+                   "CH17SA","CH21TA","DA18NA","JY14RA","JY25SA",
+                   "KI04IA","KI17NA","KI22NA","KI25TA","KI28TA", 
+                   "LU08KA","LU22GA","MA11NA","MY02HA","RE23GA",
+                   "SM04VA","SM27JA","VI14SA","XA10IA","ZA11NI",
+                   "ZA27IT","ZO02SA")
+
+# Fragebogenkurzel
+Fragebogen_krz <- c("DF","DL","SC","CI")
+
+
+
+
+
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+# Studium DL 
+## POST 
+### Data Processing 
+
+# Data Processing 
+DL_POST_01_raw_ges_tbl <- 
+Fragebogen_01_raw_tbl %>% 
+    # Post Datum 
+    filter(STARTED %in% ymd(Post_Datum)) %>% 
+    # Selelect Dl test 
+    select(contains("DL")) %>% 
+    
+    # remove NA 
+    filter(!DL20_01 %>% is.na()) %>% 
+    
+    # filter Aktive Probanden 
+    filter(DL02_01 %in% Studiengruppe|
+               DL02_01 %in% Kontrollgruppe) %>% 
+    # Counting Dublicates 
+    group_by(DL02_01) %>%
+    mutate(Count = row_number()) %>% 
+    ungroup() %>% 
+    
+    # Removing the dublicates: 
+    filter(Count==1) %>% 
+    
+    select(-Count)
+
+
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+### DL Kalk.
+#### Kontrollgurppe 
+
+# DL Gesamtwerte Kontrollgurppe: 
+DL_POST_Kontrollgruppe_01_gesamtwerte_tbl <- 
+DL_POST_01_raw_ges_tbl %>% 
+    filter(DL02_01 %in% Kontrollgruppe) %>% 
+    dl_wert() 
+    
+# DL_POST_Kontrollgruppe_01_gesamtwerte_tbl %>% view()
+
+
+# DL Lebensbereiche Studiengruppe: 
+DL_POST_Kontrollgruppe_02_lebensbereiche_tbl <- 
+DL_POST_01_raw_ges_tbl %>% 
+    # nur Kontrollgruppe 
+    filter(DL02_01%in% Kontrollgruppe) %>% 
+    dl_lb() 
+
+
+# DL_POST_Kontrollgruppe_02_lebensbereiche_tbl %>% view()
+
+
+
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+#### Studiengruppe 
+
+DL_POST_Studiengruppe_01_gesamtwerte_tbl <- 
+DL_POST_01_raw_ges_tbl %>% 
+    # Filter nur Studiengruppe: 
+    filter(DL02_01 %in% Studiengruppe) %>% 
+    # Gesamtwerte: 
+    dl_wert() 
+
+# DL_POST_Studiengruppe_01_gesamtwerte_tbl %>% view()
+
+
+DL_POST_Studiengruppe_02_lebensbereiche_tbl <- 
+DL_POST_01_raw_ges_tbl %>% 
+    # Filter nur Studiengruppe: 
+    filter(DL02_01 %in% Studiengruppe) %>% 
+    # Lebensbreiche: 
+    dl_lb() 
+
+# DL_POST_Studiengruppe_02_lebensbereiche_tbl %>% view()
+
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+### Data Processing 
+
+
+# Data Processing 
+DL_PRE_01_raw_ges_tbl <- 
+Fragebogen_01_raw_tbl %>% 
+    # Post Datum 
+    filter(STARTED %in% ymd(Pre_Datum)) %>% 
+    # Selelect Dl test 
+    select(contains("DL")) %>% 
+    
+    # remove NA 
+    filter(!DL20_01 %>% is.na()) %>% 
+    
+    # filter Aktive Probanden 
+    filter(DL02_01 %in% Studiengruppe|
+               DL02_01 %in% Kontrollgruppe) %>% 
+    # Counting Dublicates 
+    group_by(DL02_01) %>%
+    mutate(Count = row_number()) %>% 
+    ungroup() %>% 
+    
+    # Removing the dublicates: 
+    filter(Count==1) %>% 
+    
+    select(-Count)
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+### DL Kalk.
+#### Kontrollgurppe 
+
+# DL Gesamtwerte Kontrollgurppe: 
+DL_PRE_Kontrollgruppe_01_gesamtwerte_tbl <- 
+DL_PRE_01_raw_ges_tbl %>% 
+    filter(DL02_01 %in% Kontrollgruppe) %>% 
+    dl_wert() 
+    
+# DL_POST_Kontrollgruppe_01_gesamtwerte_tbl %>% view()
+
+
+# DL Lebensbereiche Studiengruppe: 
+DL_PRE_Kontrollgruppe_02_lebensbereiche_tbl <- 
+DL_PRE_01_raw_ges_tbl %>% 
+    # nur Kontrollgruppe 
+    filter(DL02_01%in% Kontrollgruppe) %>% 
+    dl_lb() 
+
+
+# DL_POST_Kontrollgruppe_02_lebensbereiche_tbl %>% view()
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+#### Studiengruppe 
+
+DL_PRE_Studiengruppe_01_gesamtwerte_tbl <- 
+DL_PRE_01_raw_ges_tbl %>% 
+    # Filter nur Studiengruppe: 
+    filter(DL02_01 %in% Studiengruppe) %>% 
+    # Gesamtwerte: 
+    dl_wert() 
+
+# DL_POST_Studiengruppe_01_gesamtwerte_tbl %>% view()
+
+
+DL_PRE_Studiengruppe_02_lebensbereiche_tbl <- 
+DL_PRE_01_raw_ges_tbl %>% 
+    # Filter nur Studiengruppe: 
+    filter(DL02_01 %in% Studiengruppe) %>% 
+    # Lebensbreiche: 
+    dl_lb() 
+
+# DL_POST_Studiengruppe_02_lebensbereiche_tbl %>% view()
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+###  Vergl. PRE/POST
+#### Kal. PRE/POST Kontrollgruppe 
+
+ #
+
+Vergeleich_01_PRE_POST_Kontrollgruppe_lebensbereiche_tbl <- 
+  
+DL_PRE_Kontrollgruppe_02_lebensbereiche_tbl %>% 
+  select(Frage_DE, M) %>% 
+    rename(M_PRE=M) %>% 
+  left_join(
+    DL_POST_Kontrollgruppe_02_lebensbereiche_tbl %>% 
+    select(Frage_DE, M) %>% 
+    rename(M_POST=M) 
+  ) %>% 
+  pivot_longer(!Frage_DE, names_to="Zeitraum", values_to="M") 
+
+
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+#### Kal. PRE/POST Studiengruppe
+
+Vergeleich_02_PRE_POST_Studiengruppe_lebensbereiche_tbl <- 
+DL_PRE_Studiengruppe_02_lebensbereiche_tbl %>% 
+    select(Frage_DE, M) %>% 
+    rename(M_PRE=M) %>% 
+  
+  left_join(
+    DL_POST_Studiengruppe_02_lebensbereiche_tbl %>% 
+    select(Frage_DE, M) %>% 
+    rename(M_POST=M) 
+  ) %>% 
+  pivot_longer(!Frage_DE, names_to="Zeitraum", values_to="M") 
+
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+#### Kal. PRE Vergeleich KG/SG
+Vergeleich_03_PRE_KG_SG <- 
+DL_PRE_Kontrollgruppe_02_lebensbereiche_tbl %>% 
+  select(Frage_DE, M) %>% 
+    rename(Kontrollgruppe=M) %>% 
+  
+  left_join(
+    
+      DL_PRE_Studiengruppe_02_lebensbereiche_tbl %>% 
+    select(Frage_DE, M) %>% 
+    rename(Studiengruppe=M) %>% 
+      mutate(Studiengruppe =Studiengruppe %>% round(2))
+  ) %>% 
+  
+  pivot_longer(!Frage_DE, names_to="Gruppe", values_to="M") %>% 
+  
+  # Formating: 
+  mutate(Frage_DE= Frage_DE %>% as_factor() %>% fct_reorder(M)) %>% 
+  mutate(Gruppe= Gruppe %>% as_factor() %>% fct_relevel("Studiengruppe", "Kontrollgruppe")) 
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+#### Kal. POST Vergeleich KG/SG
+
+Vergeleich_04_POST_KG_SG <- 
+DL_POST_Kontrollgruppe_02_lebensbereiche_tbl %>% 
+  select(Frage_DE, M) %>% 
+    rename(Kontrollgruppe=M) %>% 
+  
+  left_join(
+    
+    DL_POST_Studiengruppe_02_lebensbereiche_tbl %>% 
+    select(Frage_DE, M) %>% 
+    rename(Studiengruppe=M) %>% 
+      mutate(Studiengruppe =Studiengruppe %>% round(2))
+  ) %>% 
+  
+  pivot_longer(!Frage_DE, names_to="Gruppe", values_to="M") %>% 
+  
+  # Formating: 
+  mutate(Frage_DE= Frage_DE %>% as_factor() %>% fct_reorder(M)) %>% 
+  mutate(Gruppe= Gruppe %>% as_factor() %>% fct_relevel("Studiengruppe", "Kontrollgruppe" )) 
+
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+# Studium SC 
+##PRE
+## Data Processing 
+
+
+SC_PRE_01_raw_tbl <- 
+
+Fragebogen_01_raw_tbl %>% 
+    # Post Datum 
+    filter(STARTED %in% ymd(Pre_Datum)) %>% 
+    # Selelect Dl test 
+    select(contains("SC")) %>% 
+    
+# remove NA 
+    filter(!SC08_15 %>% is.na()) %>% 
+    
+    
+    # filter Aktive Probanden 
+    filter(SC02_01 %in% Studiengruppe|
+               SC02_01 %in% Kontrollgruppe) 
+
+
+
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## SC Raw Werte
+
+SC_PRE_01_Raw_Werte_gsm <- 
+SC_PRE_01_raw_tbl %>% 
+    # select(SC02_01:SC06_07) %>% 
+        pivot_longer(!SC02_01, names_to = "Fragen", values_to = "Antwort") %>% 
+    
+    # noten 
+    mutate(Note= case_when(
+        # SC04_ plus Zahlen 2-6 
+        Antwort=="не обтяжує"~1, 
+        Antwort=="2"~2,
+        Antwort=="3"~3,
+        Antwort=="4"~4,
+        Antwort=="5"~5,
+        Antwort=="6"~6, 
+        Antwort=="дуже сильно обтяжує"~7, 
+        
+        # SC05_ 1/7
+        Antwort=="не перевантажує"~1, 
+        Antwort=="дуже сильно перевантажує"~7, 
+        
+        # SC06_ 1/7
+        Antwort=="не сталося/ не обтяжує"~1, 
+        Antwort=="дуже сильно обтяжує"~7, 
+        
+        # SC07_ : SC_08
+        Antwort=="взагалі не стосується"~1, 
+        Antwort=="скоріш не стосується"~2,
+        Antwort=="скоріш стосується"~3,
+        Antwort=="точно стосується"~4
+    )) %>% 
+    
+    # umpoolieren  alkohol SC08_02
+    mutate(Note_fx=case_when(
+        Fragen=="SC08_02"& Note==1~4, 
+        Fragen=="SC08_02"& Note==2~3, 
+        Fragen=="SC08_02"& Note==3~2, 
+        Fragen=="SC08_02"& Note==4~1, 
+        T~Note
+        
+    )) 
+    
+    # filter(Fragen=="SC08_02") %>% view()
+    SC_PRE_02_Werte_Schl_gsm <- 
+    SC_PRE_01_Raw_Werte_gsm %>% 
+        left_join(
+            SC_Fragen_schl, by = c("Fragen"="Frage_frg")
+            ) 
+        # Berechnung 10 bereichen: 
+    SC_PRE_03_Raw_Werte_Bereiche <- 
+    SC_PRE_02_Werte_Schl_gsm %>% 
+        
+        group_by(SC02_01, Skala_krz) %>% 
+        summarize(Raw_Werte=sum(Note_fx)) %>% 
+        ungroup() %>% 
+        
+        pivot_wider(names_from=Skala_krz, values_from=Raw_Werte) %>%
+        mutate(Gesamt_Stress=Stress1+ Stress2+ Stress3) %>% 
+        
+        pivot_longer(!SC02_01, names_to= "Skala", values_to="Raw_Werte")
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## SC Schluessel Statnine/Haefigkeit 
+
+
+SC_01_prc_Frauen_20_30 <- 
+    
+SC_Stanine_HF_01_Frauen_20_30 %>% 
+    mutate_all(~replace(., is.na(.), 0)) %>% 
+    mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    mutate(Alter= "Frauen_20_30") 
+
+
+
+SC_02_prc_Frauen_31_50  <- 
+    SC_Stanine_HF_02_Frauen_31_50 %>% 
+           mutate_all(~replace(., is.na(.), 0)) %>% 
+           mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    mutate(Alter= "Frauen_31_50") 
+
+
+
+
+SC_03_prc_Frauen_52_ueber <- 
+SC_Stanine_HF_02_Frauen_52_ueber %>% 
+           mutate_all(~replace(., is.na(.), 0)) %>% 
+           mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    
+    mutate(Alter= "Frauen_52_ueber")
+
+
+SC_04_joint_tbl <- 
+    
+    SC_01_prc_Frauen_20_30 %>% 
+    union_all(
+        SC_02_prc_Frauen_31_50
+    ) %>% 
+    union_all(
+        SC_03_prc_Frauen_52_ueber
+    )
+
+
+
+
+```
+
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## Stamine HF Brechenung 
+
+
+# Define the age groups:
+Altersgruppen <- 
+Fragebogen_01_raw_tbl %>% 
+    
+    select(contains("DF")) %>% 
+    
+    filter(!DF12 %>% is.na()) %>% 
+    
+    select(DF02_01,DF03) %>% 
+    
+    mutate(Alter=case_when(
+        DF03=="18-24"~"Frauen_20_30", 
+        DF03=="25-30"~"Frauen_20_30", 
+        DF03=="31-35"~"Frauen_31_50", 
+        DF03=="36-40"~"Frauen_31_50", 
+        DF03=="41-45"~"Frauen_31_50", 
+        DF03=="46-50"~"Frauen_31_50",
+        DF03=="46-50"~"Frauen_31_50",
+        DF03=="Більше 50"~"Frauen_52_ueber"
+    )) 
+    
+# Left Join: 
+
+
+# SC_04_joint_tbl %>% glimpse()
+
+SC_PRE_04_Stamine_gsm <- 
+SC_PRE_03_Raw_Werte_Bereiche %>%
+    left_join(
+        Altersgruppen, by=c( "SC02_01"="DF02_01")
+    ) %>% 
+    left_join(
+        SC_04_joint_tbl, by=c("Skala"="Scala", "Alter"="Alter","Raw_Werte"="Raw_Werte" )
+    ) 
+
+SC_PRE_05_Kontrollgruppe_tbl <- 
+SC_PRE_04_Stamine_gsm %>% 
+    filter(SC02_01 %in% Kontrollgruppe) 
+
+
+SC_PRE_05_Studiengruppe_tbl <- 
+    SC_PRE_04_Stamine_gsm %>% 
+    filter(SC02_01 %in% Studiengruppe)
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+##POST
+## Data Processing 
+
+
+SC_POST_01_raw_tbl <- 
+
+Fragebogen_01_raw_tbl %>% 
+    # Post Datum 
+    filter(STARTED %in% ymd(Post_Datum)) %>% 
+    # Selelect Dl test 
+    select(contains("SC")) %>% 
+    
+# remove NA 
+    filter(!SC08_15 %>% is.na()) %>% 
+    
+    
+    # filter Aktive Probanden 
+    filter(SC02_01 %in% Studiengruppe|
+               SC02_01 %in% Kontrollgruppe) 
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+## SC Raw Werte
+
+SC_POST_01_Raw_Werte_gsm <- 
+SC_POST_01_raw_tbl %>% 
+    # select(SC02_01:SC06_07) %>% 
+        pivot_longer(!SC02_01, names_to = "Fragen", values_to = "Antwort") %>% 
+    
+    # noten 
+    mutate(Note= case_when(
+        # SC04_ plus Zahlen 2-6 
+        Antwort=="не обтяжує"~1, 
+        Antwort=="2"~2,
+        Antwort=="3"~3,
+        Antwort=="4"~4,
+        Antwort=="5"~5,
+        Antwort=="6"~6, 
+        Antwort=="дуже сильно обтяжує"~7, 
+        
+        # SC05_ 1/7
+        Antwort=="не перевантажує"~1, 
+        Antwort=="дуже сильно перевантажує"~7, 
+        
+        # SC06_ 1/7
+        Antwort=="не сталося/ не обтяжує"~1, 
+        Antwort=="дуже сильно обтяжує"~7, 
+        
+        # SC07_ : SC_08
+        Antwort=="взагалі не стосується"~1, 
+        Antwort=="скоріш не стосується"~2,
+        Antwort=="скоріш стосується"~3,
+        Antwort=="точно стосується"~4
+    )) %>% 
+    
+    # umpoolieren  alkohol SC08_02
+    mutate(Note_fx=case_when(
+        Fragen=="SC08_02"& Note==1~4, 
+        Fragen=="SC08_02"& Note==2~3, 
+        Fragen=="SC08_02"& Note==3~2, 
+        Fragen=="SC08_02"& Note==4~1, 
+        T~Note
+        
+    )) 
+    
+
+# SC_POST_01_Raw_Werte_gsm %>% skim()
+    # filter(Fragen=="SC08_02") %>% view()
+    SC_POST_02_Werte_Schl_gsm <- 
+    SC_POST_01_Raw_Werte_gsm %>% 
+        left_join(
+            SC_Fragen_schl, by = c("Fragen"="Frage_frg")
+            ) 
+        # Berechnung 10 bereichen: 
+    SC_POST_03_Raw_Werte_Bereiche <- 
+    SC_POST_02_Werte_Schl_gsm %>% 
+        
+        group_by(SC02_01, Skala_krz) %>% 
+        summarize(Raw_Werte=sum(Note_fx)) %>% 
+        ungroup() %>% 
+        
+        pivot_wider(names_from=Skala_krz, values_from=Raw_Werte) %>%
+        mutate(Gesamt_Stress=Stress1+ Stress2+ Stress3) %>% 
+        
+        pivot_longer(!SC02_01, names_to= "Skala", values_to="Raw_Werte") 
+        
+
+ # SC_POST_03_Raw_Werte_Bereiche %>% skim()    
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## SC Schluessel Statnine/Haefigkeit 
+
+
+SC_01_prc_Frauen_20_30 <- 
+    
+SC_Stanine_HF_01_Frauen_20_30 %>% 
+    mutate_all(~replace(., is.na(.), 0)) %>% 
+    mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    mutate(Alter= "Frauen_20_30") 
+
+
+
+SC_02_prc_Frauen_31_50  <- 
+    SC_Stanine_HF_02_Frauen_31_50 %>% 
+           mutate_all(~replace(., is.na(.), 0)) %>% 
+           mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    mutate(Alter= "Frauen_31_50") 
+
+
+
+
+SC_03_prc_Frauen_52_ueber <- 
+SC_Stanine_HF_02_Frauen_52_ueber %>% 
+           mutate_all(~replace(., is.na(.), 0)) %>% 
+           mutate(Stress1= mapply(":",Stress1_Von, Stress1_Bis), 
+           Stress2= mapply(":",Stress2_Von, Stress2_Bis), 
+           Stress3= mapply(":",Stress3_Von, Stress3_Bis),
+           Gesamt_Stress= mapply(":",Gesamt_Stress_Von, Gesamt_Stress_Bis),
+           Symptome= mapply(":",Symptome_Von, Symptome_Bis),
+           PD= mapply(":",PD_Von, PD_Bis),
+           AB= mapply(":",AB_Von, AB_Bis),
+           SU= mapply(":",SU_Von, SU_Bis),
+           RE= mapply(":",RE_Von, RE_Bis),
+           AL= mapply(":",AL_Von, AL_Bis)
+           ) %>% 
+    
+    select(Stanine:AL) %>%
+    
+    mutate(across(!c(Stanine, Häufigkeit), as.list)) %>% 
+    
+    pivot_longer(!Stanine:Häufigkeit,names_to="Scala",values_to= "Raw_Werte") %>% 
+    unnest_longer(Raw_Werte) %>% 
+    
+    mutate(Alter= "Frauen_52_ueber")
+
+
+SC_04_joint_tbl <- 
+    
+    SC_01_prc_Frauen_20_30 %>% 
+    union_all(
+        SC_02_prc_Frauen_31_50
+    ) %>% 
+    union_all(
+        SC_03_prc_Frauen_52_ueber
+    )
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## Stamine HF Brechenung
+
+
+# Define the age groups:
+Altersgruppen <- 
+Fragebogen_01_raw_tbl %>% 
+    
+    select(contains("DF")) %>% 
+    
+    filter(!DF12 %>% is.na()) %>% 
+    
+    select(DF02_01,DF03) %>% 
+    
+    mutate(Alter=case_when(
+        DF03=="18-24"~"Frauen_20_30", 
+        DF03=="25-30"~"Frauen_20_30", 
+        DF03=="31-35"~"Frauen_31_50", 
+        DF03=="36-40"~"Frauen_31_50", 
+        DF03=="41-45"~"Frauen_31_50", 
+        DF03=="46-50"~"Frauen_31_50",
+        DF03=="46-50"~"Frauen_31_50",
+        DF03=="Більше 50"~"Frauen_52_ueber"
+    )) 
+    
+# Left Join: 
+
+
+# SC_04_joint_tbl %>% glimpse()
+
+SC_POST_04_Stamine_gsm <- 
+SC_POST_03_Raw_Werte_Bereiche %>%
+    left_join(
+        Altersgruppen, by=c( "SC02_01"="DF02_01")
+    ) %>% 
+    left_join(
+        SC_04_joint_tbl, by=c("Skala"="Scala", "Alter"="Alter","Raw_Werte"="Raw_Werte" )
+    ) 
+
+
+
+
+SC_POST_05_Kontrollgruppe_tbl <- 
+SC_POST_04_Stamine_gsm %>% 
+    filter(SC02_01 %in% Kontrollgruppe)
+
+# SC_POST_05_Kontrollgruppe_tbl 
+
+SC_POST_05_Studiengruppe_tbl <- 
+    SC_POST_04_Stamine_gsm %>% 
+    filter(SC02_01 %in% Studiengruppe)
+
+
+
+
+```
+
+
+
+```{r}
+
+# SC BEREICHE 
+## PRE Kalk. Lebensbereiche 
+SC_PRE_06_Kontrollgruppe_desc_stat <- 
+SC_PRE_05_Kontrollgruppe_tbl %>% 
+  stat_des(group = Skala, wert = Stanine)
+
+
+SC_PRE_06_Studiengruppe_desc_stat <- 
+SC_PRE_05_Studiengruppe_tbl %>% 
+  stat_des(group = Skala, wert = Stanine)
+
+
+
+# Kontrollgruppe: 
+SC_PRE_07_Kontrollgruppe_desc_stat_fr <- 
+SC_PRE_06_Kontrollgruppe_desc_stat %>% 
+    fr_sc()
+
+# Studiengruppe: 
+SC_PRE_07_Studiengruppe_desc_stat_fr <- 
+SC_PRE_06_Studiengruppe_desc_stat %>% 
+    fr_sc()
+
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+## POST Kalk. Lebensbereiche 
+
+
+# 
+SC_POST_06_Kontrollgruppe_desc_stat <- 
+SC_POST_05_Kontrollgruppe_tbl %>% 
+  stat_des(group = Skala, wert = Stanine)
+
+
+
+SC_POST_06_Studiengruppe_desc_stat <- 
+SC_POST_05_Studiengruppe_tbl %>% 
+  stat_des(group = Skala, wert = Stanine)
+
+
+# Kontrolgruppe:  
+
+SC_POST_07_Kontrollgruppe_desc_stat_fr <- 
+SC_POST_06_Kontrollgruppe_desc_stat %>% 
+    fr_sc() 
+
+# Surdiengruppe:  
+SC_POST_07_Studiengruppe_desc_stat_fr <- 
+SC_POST_06_Studiengruppe_desc_stat %>% 
+    fr_sc()
+
+
+# SC_POST_06_Kontrollgruppe_desc_stat %>% view()
+# SC_POST_06_Studiengruppe_desc_stat %>% view()
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+# test 1 rename 
+Namen_test1 <- c("life area 1","life area 2","life area 3","life area 4","life area 5"
+                 ,"life area 6","life area 7","life area 8","life area 9","life area 10"
+                 ,"life area 11","life area 12","life area 13","life area 14","life area 15"
+                 ,"life area 16","life area 17"
+                 )  
+
+Bereich_test1 <- c("Arbeit", "Eltern", "Finanzen","Freizeit", "Freunde", "Gesundheit", "Heimat", 
+                   "Kinder", "Kollegen", "Lebensbilanz", "Nachbarn/Mitmenschen", "Partnerschaft/Ehe", 
+                   "Politik", "Sexualität", "Umwelt", "Wohnung", "Zukunft"
+                   )
+
+
+test1_namen_tbl <- tibble(Namen_test1,
+                          Bereich_test1)
+
+```
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+# test 2 rename 
+Namen_test2 <- c("life area 1","life area 2","life area 3","life area 4","life area 5"
+                 ,"life area 6","life area 7","life area 8","life area 9","life area 10"
+                 )
+
+Bereich_test2 <- c("Aktive Stressbewältigung", "Alkohol- und Zigarettenkonsum", "Gesamt-Stressbelastung",
+                   "Positives Denken", "Halt im Glauben", "Stress durch Unsicherheit", 
+                   "Stress durch Überforderung", "Stress durch Verlust", "Soziale Unterstützung", 
+                   "Stresssymptome"
+                   )
+
+
+test2_namen_tbl <- tibble(Namen_test2,
+                          Bereich_test2)
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+```{r, results='hide', message=FALSE, warning=FALSE, echo=FALSE}
+
+
+
+
+```
+
+
+
+
+
+Row {data-height=700}
+-----------------------------------------------------------------------
+
+### PRE Training, Comparison between control and study groups 
+
+
+```{r, fig.width = 5, fig.height = 10}
+
+
+
+Vergeleich_03_PRE_KG_SG %>% 
+  
+    mutate(Gruppe= case_when(
+    Gruppe=="Studiengruppe"~"Study Group", 
+    Gruppe=="Kontrollgruppe"~"Control Group"
+  )) %>% 
+  
+  mutate(text      =   str_glue("{Gruppe}\nMean: {M}")) %>% 
+    
+  left_join(test1_namen_tbl, by=c("Frage_DE"= "Bereich_test1")) %>% 
+  
+
+  
+  mutate(Frage_DE = Namen_test1 %>% as_factor() %>% fct_reorder(M)) %>% 
+
+  
+  plot_test( x     = ~ M
+            ,y     = ~ Frage_DE
+            ,group = ~ Gruppe
+            ,text  = ~ text
+            ,order =   c( "Study Group","Control Group")
+            )
+
+
+
+
+
+
+# Post: 
+
+# Vergeleich_03_PRE_KG_SG %>% 
+#   
+#   mutate(text      =   str_glue("{Gruppe}\nMittelwert: {M}")) %>% distinct(Frage_DE)
+
+```
+
+
+### POST Training, Comparison between control and study groups 
+```{r, fig.width = 5, fig.height = 10}
+
+
+Vergeleich_04_POST_KG_SG %>% 
+    
+  mutate(Gruppe= case_when(
+    Gruppe=="Studiengruppe"~"Study Group", 
+    Gruppe=="Kontrollgruppe"~"Control Group"
+  )) %>% 
+  
+  mutate(text      =   str_glue("{Gruppe}\nMean: {M}")) %>% 
+  left_join(test1_namen_tbl, by=c("Frage_DE"= "Bereich_test1")) %>% 
+  mutate(Frage_DE = Namen_test1 %>% as_factor() %>% fct_reorder(M)) %>% 
+  
+  
+  plot_test( x     = ~ M
+            ,y     = ~ Frage_DE
+            ,group = ~ Gruppe
+            ,text  = ~ text
+            ,order =   c( "Study Group","Control Group")
+            )
+
+
+
+```
+
+
+
+Row {data-height=700}
+-----------------------------------------------------------------------
+
+### Control group: PRE/POST comparison of life areas  
+
+
+```{r, fig.width = 5, fig.height = 10}
+
+Vergeleich_01_PRE_POST_Kontrollgruppe_lebensbereiche_tbl %>% 
+  
+    mutate(Frage_DE= Frage_DE %>% as_factor() %>% fct_reorder(M)) %>% 
+    
+    left_join(test1_namen_tbl, by=c("Frage_DE"= "Bereich_test1")) %>% 
+    mutate(Frage_DE = Namen_test1 %>% as_factor() %>% fct_reorder(M)) %>% 
+    
+    mutate(M=M %>% round(2)) %>% 
+  
+  # fix Namen Zeitraum 
+  mutate(Zeitraum=case_when(
+    Zeitraum=="M_PRE"~"PRE", 
+    Zeitraum=="M_POST"~"POST",
+  )) %>% 
+  
+  mutate(Zeitraum=Zeitraum %>% as_factor() %>% fct_relevel("POST","PRE")) %>%  
+  
+  mutate(text      =   str_glue("{Zeitraum}\nMean: {M}")) %>% 
+  
+  plot_test( x     = ~ M
+            ,y     = ~ Frage_DE
+            ,group = ~ Zeitraum
+            ,text  = ~ text
+            ,order =   c( "POST", "PRE")
+            )
+
+
+
+
+```
+
+
+### Study group: PRE/POST comparison of life areas  
+```{r, fig.width = 5, fig.height = 10}
+
+
+Vergeleich_02_PRE_POST_Studiengruppe_lebensbereiche_tbl %>% 
+  
+    mutate(Frage_DE= Frage_DE %>% as_factor() %>% fct_reorder(M)) %>% 
+    mutate(M=M %>% round(2)) %>% 
+    
+    left_join(test1_namen_tbl, by=c("Frage_DE"= "Bereich_test1")) %>% 
+    mutate(Frage_DE = Namen_test1 %>% as_factor() %>% fct_reorder(M)) %>% 
+  
+  # fix Namen Zeitraum 
+  mutate(Zeitraum=case_when(
+    Zeitraum=="M_PRE"~"PRE", 
+    Zeitraum=="M_POST"~"POST",
+  )) %>% 
+  
+  mutate(Zeitraum=Zeitraum %>% as_factor() %>% fct_relevel("POST","PRE")) %>% 
+
+  mutate(text      =   str_glue("{Zeitraum}\nMean: {M}")) %>%
+
+  plot_test( x     = ~ M
+            ,y     = ~ Frage_DE
+            ,group = ~ Zeitraum
+            ,text  = ~ text
+            ,order =   c( "POST", "PRE")
+            )
+
+
+```
+
+
+Test 2 {data-icon="fa-signal"}
+==============================================================
+
+
+
+Row {data-height=500}
+-----------------------------------------------------------------------
+
+### PRE Training, Comparison between control and study groups 
+
+```{r, fig.width = 5, fig.height = 5}
+
+
+# Kalkulation 
+SCI_PRE_KG_SG <- 
+SC_PRE_06_Kontrollgruppe_desc_stat %>% 
+  
+  rename(Kontrollgruppe=M) %>% 
+  select(Skala, Kontrollgruppe) %>% 
+  
+  left_join(
+  
+  SC_PRE_06_Studiengruppe_desc_stat %>% 
+  
+  rename(Studiengruppe=M) %>% 
+  select(Skala, Studiengruppe) %>% 
+  mutate(Studiengruppe=Studiengruppe %>% round(2))
+    
+  ) %>% 
+  
+  pivot_longer(!Skala, names_to="Gruppe", values_to= "M") %>% 
+  
+    left_join(
+    SC_Skala, by=c("Skala"="Skala_krz")
+  ) %>% 
+  
+  # Factor Order 
+    mutate(Order= case_when(
+    Skala_Name=="Stress durch Unsicherheit"~1, 
+    Skala_Name=="Stress durch Überforderung"~2, 
+    Skala_Name=="Stress durch Verlust"~3, 
+    Skala_Name=="Gesamt-Stressbelastung"~4, 
+    Skala_Name=="Stresssymptome"~5, 
+    Skala_Name=="Positives Denken"~6, 
+    Skala_Name=="Aktive Stressbewältigung"~7, 
+    Skala_Name=="Soziale Unterstützung"~8, 
+    Skala_Name=="Halt im Glauben"~9,
+    Skala_Name=="Alkohol- und Zigarettenkonsum"~10, 
+  )) %>% 
+  
+  # Ordering the Factors: 
+  mutate(Gruppe= Gruppe %>% as_factor() %>% fct_relevel("Studiengruppe", "Kontrollgruppe")) %>% 
+  
+  mutate(Skala_Name=Skala_Name %>% as_factor() %>%
+           fct_reorder(Order,.desc = T )) %>% 
+    
+  left_join(test2_namen_tbl, by = c("Skala_Name"="Bereich_test2")) %>% 
+  mutate(Skala_Name= Namen_test2 %>% as_factor() %>% fct_reorder(Order,.desc = T )) %>% 
+  
+    mutate(Gruppe= case_when(
+    Gruppe=="Studiengruppe"~"Study Group", 
+    Gruppe=="Kontrollgruppe"~"Control Group"
+  )) 
+
+
+
+# Vis: 
+
+SCI_PRE_KG_SG %>%  
+  
+  mutate(text        =   str_glue("{Gruppe}\nMean: {M}")) %>% 
+  
+  plot_test(   x     = ~ M
+              ,y     = ~ Skala_Name
+              ,group = ~ Gruppe
+              ,text  = ~ text
+              ,order =   c("Study Group", "Control Group")
+            )
+  
+
+
+  
+
+
+```
+
+
+### POST Training, Comparison between control and study groups 
+
+```{r, fig.width = 5, fig.height = 5}
+
+
+# Kalkulation: 
+
+SCI_POST_KG_SG <-
+SC_POST_06_Kontrollgruppe_desc_stat %>%
+
+  rename(Kontrollgruppe=M) %>%
+  select(Skala, Kontrollgruppe) %>%
+
+  left_join(
+
+  SC_POST_06_Studiengruppe_desc_stat %>%
+
+  rename(Studiengruppe=M) %>%
+  select(Skala, Studiengruppe) %>%
+  mutate(Studiengruppe=Studiengruppe %>% round(2))
+
+  ) %>%
+
+  pivot_longer(!Skala, names_to="Gruppe", values_to= "M") %>%
+
+    left_join(
+    SC_Skala, by=c("Skala"="Skala_krz")
+  ) %>%
+
+  # Factor Order
+    mutate(Order= case_when(
+    Skala_Name=="Stress durch Unsicherheit"~1,
+    Skala_Name=="Stress durch Überforderung"~2,
+    Skala_Name=="Stress durch Verlust"~3,
+    Skala_Name=="Gesamt-Stressbelastung"~4,
+    Skala_Name=="Stresssymptome"~5,
+    Skala_Name=="Positives Denken"~6,
+    Skala_Name=="Aktive Stressbewältigung"~7,
+    Skala_Name=="Soziale Unterstützung"~8,
+    Skala_Name=="Halt im Glauben"~9,
+    Skala_Name=="Alkohol- und Zigarettenkonsum"~10,
+  )) %>%
+
+  # Ordering the Factors:
+  mutate(Gruppe= Gruppe %>% as_factor() %>% fct_relevel("Studiengruppe", "Kontrollgruppe")) %>%
+
+  mutate(Skala_Name=Skala_Name %>% as_factor() %>%
+           fct_reorder(Order,.desc = T )) %>% 
+  left_join(test2_namen_tbl, by = c("Skala_Name"="Bereich_test2")) %>% 
+  mutate(Skala_Name= Namen_test2 %>% as_factor() %>% fct_reorder(Order,.desc = T )) %>% 
+  
+    mutate(Gruppe= case_when(
+    Gruppe=="Studiengruppe"~"Study Group", 
+    Gruppe=="Kontrollgruppe"~"Control Group"
+  )) 
+
+
+
+
+# # VIS
+  
+SCI_POST_KG_SG %>%
+
+  mutate(text        =   str_glue("{Gruppe}\nMean: {M}")) %>%
+
+  plot_test(   x     = ~ M
+              ,y     = ~ Skala_Name
+              ,group = ~ Gruppe
+              ,text  = ~ text
+              ,order =   c("Study Group", "Control Group")
+            )
+  
+
+```
+
+
+
+Row {data-height=500}
+-----------------------------------------------------------------------
+
+### Control group: PRE/POST comparison of life areas
+```{r, fig.width = 5, fig.height = 5}
+
+# Vergeleich PRE/Post Kontroll.
+
+
+Plot_SC_PRE_POST_Kontrollgruppe <- 
+SC_PRE_06_Kontrollgruppe_desc_stat %>% 
+  
+  rename(M_PRE=M) %>% 
+  select(Skala, M_PRE) %>% 
+  left_join(
+      SC_POST_06_Kontrollgruppe_desc_stat %>% 
+    rename(M_POST=M) %>% 
+    select(Skala, M_POST)
+  ) %>% 
+  pivot_longer(!Skala, names_to="Zeitraum", values_to= "M") %>% 
+  
+  left_join(
+    SC_Skala, by=c("Skala"="Skala_krz")
+  ) %>% 
+  
+  mutate(Zeitraum=case_when(
+    Zeitraum=="M_PRE"~"PRE", 
+    Zeitraum=="M_POST"~"POST",
+  )) %>% 
+  
+  mutate(Zeitraum=Zeitraum %>% as_factor() %>% fct_relevel("POST","PRE")) %>% 
+  
+  mutate(Order= case_when(
+    Skala_Name=="Stress durch Unsicherheit"~1, 
+    Skala_Name=="Stress durch Überforderung"~2, 
+    Skala_Name=="Stress durch Verlust"~3, 
+    Skala_Name=="Gesamt-Stressbelastung"~4, 
+    Skala_Name=="Stresssymptome"~5, 
+    Skala_Name=="Positives Denken"~6, 
+    Skala_Name=="Aktive Stressbewältigung"~7, 
+    Skala_Name=="Soziale Unterstützung"~8, 
+    Skala_Name=="Halt im Glauben"~9,
+    Skala_Name=="Alkohol- und Zigarettenkonsum"~10, 
+  )) %>% 
+  
+  mutate(Skala_Name=Skala_Name %>% as_factor() %>%
+           fct_reorder(Order,.desc = T )) %>% 
+  left_join(test2_namen_tbl, by = c("Skala_Name"="Bereich_test2")) %>% 
+  mutate(Skala_Name= Namen_test2 %>% as_factor() %>% fct_reorder(Order,.desc = T ))
+    
+    
+  
+#    ggplot(aes(x=Skala_Name,y=M, fill=Zeitraum))+
+#   
+#     geom_col(position = "dodge")+ 
+#   
+#    scale_fill_manual(values = c("#18BC9C","#1F78B4"))+ 
+#   
+#     labs(
+#     title = "",
+#     x= "",
+#     y=""
+#   )+
+#   coord_flip()+ 
+#     theme(
+#       axis.text.x = element_text(angle = 90, hjust = 1)#, 
+#       #axis.text = element_text(size = 20, color = "blue")
+#         ) + 
+#     geom_text(aes(label=M) ,position = position_dodge(width=0.9), hjust=1.2,size=2.5,
+#               colour="white", fontface="bold")+
+# 
+#     # theme(axis.text.x = element_text(angle = 90, hjust = 1), 
+#     #       axis.text.y = element_text(size = 30)) +
+#  theme_tq(base_size = 10)
+#   
+#   
+# ggplotly(Plot_SC_PRE_POST_Kontrollgruppe) %>% 
+#       style(textposition = "left") %>%
+#     #layout(leged = list(orientation ="h", x = 0.4, y= -0.2 ))
+#       plotly::layout(legend=list(x=0, 
+#                              xanchor = 'left', 
+#                              yanchor = 'bottom', 
+#                              orientation = 'h'
+#                              )) %>% 
+#   style(hoverinfo = 'none')
+
+
+
+Plot_SC_PRE_POST_Kontrollgruppe %>%
+  mutate(text      =   str_glue("{Zeitraum}\nMean: {M}")) %>% 
+  
+  plot_test( x     = ~ M
+            ,y     = ~ Skala_Name
+            ,group = ~ Zeitraum
+            ,text  = ~ text
+            ,order =   c( "POST", "PRE")
+            )
+  
+
+```
+
+
+
+### Study group: PRE/POST comparison of life areas
+
+```{r, fig.width = 5, fig.height = 5}
+
+Plot_SC_PRE_POST_Studiengruppe <- 
+SC_PRE_06_Studiengruppe_desc_stat %>% 
+  
+  rename(M_PRE=M) %>% 
+  select(Skala, M_PRE) %>% 
+  left_join(
+      SC_POST_06_Studiengruppe_desc_stat %>% 
+    rename(M_POST=M) %>% 
+    select(Skala, M_POST)
+  ) %>% 
+  pivot_longer(!Skala, names_to="Zeitraum", values_to= "M") %>% 
+  
+  left_join(
+    SC_Skala, by=c("Skala"="Skala_krz")
+  ) %>% 
+  
+  mutate(Zeitraum=case_when(
+    Zeitraum=="M_PRE"~"PRE", 
+    Zeitraum=="M_POST"~"POST",
+  )) %>% 
+  
+  mutate(Zeitraum=Zeitraum %>% as_factor() %>% fct_relevel("POST","PRE")) %>% 
+  
+  mutate(Order= case_when(
+    Skala_Name=="Stress durch Unsicherheit"~1, 
+    Skala_Name=="Stress durch Überforderung"~2, 
+    Skala_Name=="Stress durch Verlust"~3, 
+    Skala_Name=="Gesamt-Stressbelastung"~4, 
+    Skala_Name=="Stresssymptome"~5, 
+    Skala_Name=="Positives Denken"~6, 
+    Skala_Name=="Aktive Stressbewältigung"~7, 
+    Skala_Name=="Soziale Unterstützung"~8, 
+    Skala_Name=="Halt im Glauben"~9,
+    Skala_Name=="Alkohol- und Zigarettenkonsum"~10, 
+  )) %>% 
+  
+  mutate(Skala_Name=Skala_Name %>% as_factor() %>%
+           fct_reorder(Order,.desc = T )) %>% 
+  
+  mutate(M=M %>% round(2)) %>% 
+    
+  left_join(test2_namen_tbl, by = c("Skala_Name"="Bereich_test2")) %>% 
+  mutate(Skala_Name= Namen_test2 %>% as_factor() %>% fct_reorder(Order,.desc = T ))
+    
+  
+Plot_SC_PRE_POST_Studiengruppe %>% 
+  mutate(text      =   str_glue("{Zeitraum}\nMean: {M}")) %>% 
+  
+  plot_test( x     = ~ M
+            ,y     = ~ Skala_Name
+            ,group = ~ Zeitraum
+            ,text  = ~ text
+            ,order =   c( "POST", "PRE")
+            )
+  
+
+```
+
+
+Introduction {data-icon="fa-pencil"}
+=======================
+
+
+
+<span style="color:blue; font-weight: bold"> PsyTest Dashboard</span> was created to display the results
+of the psychometric tests, measuring the psychological improvement of subjects after the deep muscle relaxation training. The subjects were splitted in two groups: study group and control group. The study group members participated in the deep muscle relaxation training in contrast to the control group. 
+
+There are two test conducted measuring imporovements in particular life areas. 
+The data is simulated but the structure of the questionnaires remains unchanged. 
+
+The Dashboard was build with the help of **R Flexdahboard** package and distributed from the **github pages**. 
+
+

@@ -1844,7 +1844,7 @@ Introduction {data-icon="fa-pencil"}
 <span style="color:blue; font-weight: bold"> PsyTest Dashboard</span> was created to display the results
 of the psychometric tests, measuring the psychological improvement of subjects after the deep muscle relaxation training. The subjects were splitted in two groups: study group and control group. The study group members participated in the deep muscle relaxation training in contrast to the control group. 
 
-There are two test conducted measuring imporovements in particular life areas. 
+There are two test conducted measuring improvements in particular life areas. 
 The data is simulated but the structure of the questionnaires remains unchanged. 
 
 The Dashboard was build with the help of **R Flexdahboard** package and distributed from the **github pages**. 
